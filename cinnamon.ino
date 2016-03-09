@@ -62,4 +62,5 @@ void readDHT() {
   Serial.print("Heat Index: ");
   Serial.print(hIndex);
   Serial.print(CF);
+  Serial.print("\n");
 }
