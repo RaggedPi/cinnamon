@@ -1,33 +1,39 @@
-// RaggedPi Project
-// Arduino 2 "Cinnamon"
-// Written by david durost <david.durost@gmail.com>
+/*
+  RaggedPi Project
+  Arduino 2 "Cinnamon" - Basement
+  Written by david durost <david.durost@gmail.com>
+*/
 
-// Includes
+/* Includes */
 #include <DHT.h> // temp sensor
 #include <SPI.h> 
 #include <SD.h> // sd card reader
-//#include <SoftwareSerial.h> // camera
-//#include <Adafruit_VC0706.h> // camera
+// #include <SoftwareSerial.h> // camera
+// #include <Adafruit_VC0706.h> // camera
 
-// Defines
+/* Defines */
+// DHT
 #define DHTPIN 4 // arduino digital pin
-#define DHTTYPE DHT11
+#define DHTTYPE DHT11 // DHT11 or DHT22
 #define DHTTIME 2000 // wait 2 sec between measurements
-#define DHTFAHRENHEIT true // fahrenheit (true) or celsius (false)
-
+#define DHTFAHRENHEIT true // Fahrenheit (true) or celsius (false)
+// PIR
 #define PIRLED 13 // LED output pin
 #define PIRPIN 2 // arduino digital pin
 #define PIRINIT 30 // sensor intialization time
-
+// MQ2
 #define MQ2PIN A0 // arduino analog pin
 
-int ledState = LOW;
+/* Variables */
+int ledState = LOW; // LED state
 bool initialized[2] = { false, false }; // Boolean array denoting if each module has been initialized
   
-
-// Initializations
+/* Initializations */
 DHT dht(DHTPIN, DHTTYPE);
 
+/**
+ * Setup
+ */
 void setup() {
   Serial.begin(9600);
   Serial.println("RaggedPi Project Codename Cinnamon Initialized.");
@@ -36,7 +42,10 @@ void setup() {
   initializePIR();
 }
 
-// Read DHT sensor
+/**
+ * Read DHT sensor
+ * @return null
+ */
 void readDHT() {
   delay(DHTTIME);
   
@@ -57,13 +66,13 @@ void readDHT() {
   float hIndex = dht.computeHeatIndex(temp, humidity, DHTFAHRENHEIT);
   
   // Output
-  String CF = "";
+  char* CF;
   if (DHTFAHRENHEIT) {
     CF = " *F\t";
   } else {
     CF = " *C\t";
   }
-  
+
   Serial.print("Temperature: ");
   Serial.print(temp);
   Serial.print(CF);
@@ -100,12 +109,12 @@ void readPIR() {
   int state = LOW;
   
   // If there's motion...
-  if (pir = HIGH) {
-    digitalWrite(PIRLED, HIGH);
+  if (pir == HIGH) {
     if (state == LOW) {
       // Toggle PIR state
       state = HIGH;
       Serial.print("Motion detected.\n");
+      pinMode(PIRLED, HIGH);
       // capturePhoto();
     }
   } else {
@@ -113,11 +122,14 @@ void readPIR() {
     if (state == HIGH) {
       state == LOW;
       Serial.print("Motion ended.\n");
+      pinMode(PIRLED, LOW);
     }
   }
 }
 
-// Read MQ2 sensor
+/**
+ * Read MQ2 sensor
+ */
 void readMQ2() {
   int gasLvl = analogRead(MQ2PIN);
   int state = LOW;
@@ -130,7 +142,7 @@ void readMQ2() {
     Serial.print("]\n");
 
     // trigger alarm
-  } else if (gasLvl < 200 && state == HIGH) {
+  } else if (gasLvl <= 200 && state == HIGH) {
     state = LOW;
     Serial.print("Gas levels nominal. [");
     Serial.print(gasLvl);
