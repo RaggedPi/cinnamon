@@ -7,7 +7,7 @@
 /* Includes */
 #include <DHT.h> // temp sensor
 #include <SPI.h> 
-#include <SD.h> // sd card reader
+// #include <SD.h> // sd card reader
 // #include <SoftwareSerial.h> // camera
 // #include <Adafruit_VC0706.h> // camera
 
@@ -23,6 +23,17 @@
 #define PIRINIT 30 // sensor intialization time
 // MQ2
 #define MQ2PIN A0 // arduino analog pin
+// Fire
+#define FIREMIN 0 // min sensor reading
+#define FIREMAX 1024 // max sensor reading
+#define FIREPIN A1 // sensor analog pin
+#define FIRETIME 5000 // time between readings (5s)
+// Alarm
+#define SPEAKERPIN 10 // pzSpeaker pin
+#define FIREALARM 1 
+// #define FIRECLOSEALARM 1
+// #define FIREDISTANTALARM 2
+#define GASALARM 2 // 3
 
 /* Variables */
 int ledState = LOW; // LED state
@@ -103,7 +114,9 @@ void initializePIR() {
   delay(50);
 }
 
-// Read PIR sensor
+/**
+ * Read PIR sensor
+ */
 void readPIR() {
   int pir = digitalRead(PIRPIN);
   int state = LOW;
@@ -140,19 +153,96 @@ void readMQ2() {
     Serial.print("Gas detected! [");
     Serial.print(gasLvl);
     Serial.print("]\n");
-
-    // trigger alarm
+//    toggleAlarm(GASALARM);
   } else if (gasLvl <= 200 && state == HIGH) {
     state = LOW;
     Serial.print("Gas levels nominal. [");
     Serial.print(gasLvl);
     Serial.print("]\n");
-    // toggle alarm
+// toggleAlarm(false);
+  }
+}
+
+/**
+ * Read fire sensor
+ */
+void readFire() {
+  // Map sensor range
+  int range = map(analogRead(FIREPIN), FIREMIN, FIREMAX, 0, 3);
+
+  switch (range) {
+    case 0: // A fire within 1.5 feet
+      Serial.print("Close fire!\n");
+      toggleAlarm(FIREALARM);
+      break;
+    case 1: // A fire between 1.5 and 3 feet
+      Serial.print("Distant fire detected.\n");
+      toggleAlarm(FIREALARM);
+      break;
+    case 2: // No fire
+      Serial.print("All clear.\n");
+      toggleAlarm(false);      
+      break;
+  }
+  delay(FIRETIME);
+}
+
+/**
+ * Toggle alarms
+ * @param  int alarm
+ */
+void toggleAlarm(int alarm) {
+  switch(alarm) {
+    case FIREALARM:
+      Serial.print("alarm activated. [fire]\n");
+/** @todo separate tones for close and distant */
+//      digitalWrite(SPEAKERPIN, HIGH);
+      playTone(500, 600);
+      delay(100);
+      playTone(500, 800);
+      delay(100);
+    break;
+    case GASALARM:
+      Serial.print("alarm activated. [gas]\n");
+//      digitalWrite(SPEAKERPIN, HIGH);
+      playTone(500, 400);
+      delay(100);
+      playTone(500, 600);
+      delay(100);
+    break;
+    case false:
+      Serial.print("alarm deactivated.");
+//      digitalWrite(SPEAKERPIN, LOW);
+      playTone(0, 0);
+      delay(300);      
+    break;
+  }
+}
+
+/**
+ * Play audible tone from speaker
+ * @param  long duration
+ * @param  int  freq
+ */
+void playTone(long duration, int freq) {
+  duration *= 1000;
+  int period = (1.0 / freq) * 1000000;
+  long elapsed_time = 0;
+  while (elapsed_time < duration) {
+    digitalWrite(SPEAKERPIN,HIGH);
+    delayMicroseconds(period / 2);
+    digitalWrite(SPEAKERPIN, LOW);
+    delayMicroseconds(period / 2);
+    elapsed_time += (period);
   }
 }
  
+/**
+ * Loop
+ */
 void loop() {
   readDHT();
   readPIR();
   readMQ2();
+//  readFire();
 }

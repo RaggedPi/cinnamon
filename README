@@ -4,7 +4,7 @@ Codename: Cinnamon
 Basement Arduino unit
 
 Features:
-- wifi
+- xBee2
 - temperature/ humidity sensor
 - fire sensor
 - smoke/ odor sensor
