@@ -43,6 +43,18 @@ bool initialized[2] = { false, false }; // Boolean array denoting if each module
 DHT dht(DHTPIN, DHTTYPE);
 
 /**
+ * Float to int hack
+ *  Arduino Uno chipset does not support floats being 
+ *  used with sprintf this is half of the workaround
+ * @param  float f
+ * @return int
+ */
+int floatToIntHack(float f) {
+  int i = f * 100;
+  return i;
+}
+
+/**
  * Setup
  */
 void setup() {
@@ -83,6 +95,18 @@ void readDHT() {
   } else {
     CF = " *C\t";
   }
+
+  // char* output = "";
+  // sprintf(
+  //   output,
+  //   "Temperature: %d %c Humidity: %d %%\t Heat Index: %d %c\n",
+  //   floatToIntHack(temp),
+  //   CF,
+  //   floatToIntHack(humidity),
+  //   floatToIntHack(hIndex),
+  //   CF
+  // );
+  // Serial.print(output);
 
   Serial.print("Temperature: ");
   Serial.print(temp);
