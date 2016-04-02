@@ -5,9 +5,12 @@
 */
 
 /* Includes */
+#include <TimeLib.h>
+#include <Wire.h>
+#include <DS3231.h>
 #include <DHT.h> // temp sensor
 #include <SPI.h> 
-// #include <SD.h> // sd card reader
+#include <SD.h> // sd card reader
 // #include <SoftwareSerial.h> // camera
 // #include <Adafruit_VC0706.h> // camera
 
@@ -38,9 +41,12 @@
 /* Variables */
 int ledState = LOW; // LED state
 bool initialized[2] = { false, false }; // Boolean array denoting if each module has been initialized
+File photo;
+Time t;
   
-/* Initializations */
+/* objects */
 DHT dht(DHTPIN, DHTTYPE);
+DS3231  rtc(SDA, SCL);
 
 /**
  * Float to int hack
@@ -55,15 +61,20 @@ int floatToIntHack(float f) {
 }
 
 /**
- * Setup
+ * Initialize RTC
  */
-void setup() {
-  Serial.begin(9600);
-  Serial.println("RaggedPi Project Codename Cinnamon Initialized.");
+void initializeRTC() {
+  Serial.print("Initializing Real Time Clock...\n");
+  // Init RTC in 24 hour mode
+  rtc.begin(); 
+
+  // Set inital date/time
+  rtc.setTime(13,0,0);
+  rtc.setDate(4,1,2016);
   
-  dht.begin();
-  initializePIR();
+  Serial.print("RTC Initialized.\n");
 }
+
 
 /**
  * Read DHT sensor
@@ -96,28 +107,28 @@ void readDHT() {
     CF = " *C\t";
   }
 
-  // char* output = "";
-  // sprintf(
-  //   output,
-  //   "Temperature: %d %c Humidity: %d %%\t Heat Index: %d %c\n",
-  //   floatToIntHack(temp),
-  //   CF,
-  //   floatToIntHack(humidity),
-  //   floatToIntHack(hIndex),
-  //   CF
-  // );
-  // Serial.print(output);
+  char* output = "";
+  sprintf(
+    output,
+    "Temperature: %d %c Humidity: %d %%\t Heat Index: %d %c\n",
+    floatToIntHack(temp),
+    CF,
+    floatToIntHack(humidity),
+    floatToIntHack(hIndex),
+    CF
+  );
+  Serial.print(output);
 
-  Serial.print("Temperature: ");
-  Serial.print(temp);
-  Serial.print(CF);
-  Serial.print("Humidity: ");
-  Serial.print(humidity);
-  Serial.print("%\t");
-  Serial.print("Heat Index: ");
-  Serial.print(hIndex);
-  Serial.print(CF);
-  Serial.print("\n");
+  // Serial.print("Temperature: ");
+  // Serial.print(temp);
+  // Serial.print(CF);
+  // Serial.print("Humidity: ");
+  // Serial.print(humidity);
+  // Serial.print("%\t");
+  // Serial.print("Heat Index: ");
+  // Serial.print(hIndex);
+  // Serial.print(CF);
+  // Serial.print("\n");
 }
 
 // Initialize PIR sensor
@@ -265,8 +276,42 @@ void playTone(long duration, int freq) {
  * Loop
  */
 void loop() {
+  t = rtc.getTime();
   readDHT();
   readPIR();
   readMQ2();
 //  readFire();
+}
+
+/**
+ * Generate filename
+ * @return char*
+ */
+char* generateFileName() {
+  char* name;
+  
+  sprintf(
+    name,
+    "%d_%d_%d_%d_%d_%d",
+    rtc.getMonthStr(),
+    t.date,
+    t.year,
+    t.hour,
+    t.min,
+    t.sec);
+
+  return name;
+}
+
+/**
+ * Setup
+ */
+void setup() {
+  Serial.begin(9600);
+  Serial.println("RaggedPi Project Codename Cinnamon Initialized.");
+  
+  SPI.begin();
+  dht.begin();
+  initializePIR();
+  initializeRTC();
 }
