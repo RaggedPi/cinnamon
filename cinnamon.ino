@@ -5,48 +5,48 @@
 */
 
 /* Includes */
-#include <TimeLib.h>
-#include <Wire.h>
-#include <DS3231.h>
-#include <DHT.h> // temp sensor
-#include <SPI.h> 
-#include <SD.h> // sd card reader
-// #include <SoftwareSerial.h> // camera
+#include <TimeLib.h>        // time
+#include <Wire.h>           // 1-wire
+#include <DS3231.h>         // rtc
+#include <DHT.h>            // temp sensor
+#include <SPI.h>            // spi
+#include <SD.h>             // sd card reader
+//  #include <SoftwareSerial.h>  // camera
 // #include <Adafruit_VC0706.h> // camera
 
 /* Defines */
+// #define DEBUG 1             // uncomment for debug (verbose) mode
 // DHT
 #define DHTPIN 4 // arduino digital pin
-#define DHTTYPE DHT11 // DHT11 or DHT22
-#define DHTTIME 2000 // wait 2 sec between measurements
-#define DHTFAHRENHEIT true // Fahrenheit (true) or celsius (false)
+#define DHTTYPE DHT11       // DHT11 or DHT22
+#define DHTTIME 2000        // (ms) wait 2 sec between measurements
+#define DHTFAHRENHEIT true  // Fahrenheit (true) or Celsius (false)
 // PIR
-#define PIRLED 13 // LED output pin
-#define PIRPIN 2 // arduino digital pin
-#define PIRINIT 30 // sensor intialization time
+#define PIRLED 13           // LED output pin
+#define PIRPIN 2            // arduino digital pin
+#define PIRINIT 30          // sensor intialization delay time
 // MQ2
-#define MQ2PIN A0 // arduino analog pin
+#define MQ2PIN A0           // arduino analog pin
 // Fire
-#define FIREMIN 0 // min sensor reading
-#define FIREMAX 1024 // max sensor reading
-#define FIREPIN A1 // sensor analog pin
-#define FIRETIME 5000 // time between readings (5s)
+#define FIREMIN 0           // min sensor reading
+#define FIREMAX 1024        // max sensor reading
+#define FIREPIN A1          // arduino analog pin
+#define FIRETIME 5000       // time between readings (5s)
 // Alarm
-#define SPEAKERPIN 10 // pzSpeaker pin
-#define FIREALARM 1 
-// #define FIRECLOSEALARM 1
-// #define FIREDISTANTALARM 2
-#define GASALARM 2 // 3
+#define SPEAKERPIN 8        // arduino digital pin
+#define GASALARM 1          // alarm delimiter
+#define FIREALARM 2         // alarm delimiter
+// #define FIRECLOSEALARM 2    // alarm delimiter
+// #define FIREDISTANTALARM 3  // alarm delimiter
 
 /* Variables */
-int ledState = LOW; // LED state
-bool initialized[2] = { false, false }; // Boolean array denoting if each module has been initialized
-File photo;
-Time t;
+int ledState = LOW;         // LED state
+File photo;                 // camera photo
+Time t;                     // time instance
   
-/* objects */
-DHT dht(DHTPIN, DHTTYPE);
-DS3231  rtc(SDA, SCL);
+/* Objects */
+DHT dht(DHTPIN, DHTTYPE);   // thermometer
+DS3231  rtc(SDA, SCL);      // real time clock
 
 /**
  * Float to int hack
@@ -56,6 +56,10 @@ DS3231  rtc(SDA, SCL);
  * @return int
  */
 int floatToIntHack(float f) {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered floatToIntHack.");
+  #endif
+
   int i = f * 100;
   return i;
 }
@@ -64,23 +68,45 @@ int floatToIntHack(float f) {
  * Initialize RTC
  */
 void initializeRTC() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered initializeRTC.");
+  #endif
+
   Serial.print("Initializing Real Time Clock...\n");
   // Init RTC in 24 hour mode
   rtc.begin(); 
 
   // Set inital date/time
   rtc.setTime(13,0,0);
-  rtc.setDate(4,1,2016);
+  rtc.setDate(2,4,2016);
   
   Serial.print("RTC Initialized.\n");
 }
 
+/**
+ * Initialize speaker
+ */
+void initializeSpeaker() {
+  #ifdef DEBUG
+    Serial.print("[DEBUG] Entered initializeSpeaker.");
+  #endif
+
+  Serial.print("Initializing speaker...\n");
+
+  pinMode(SPEAKERPIN, OUTPUT);
+  delay(1000);
+  Serial.print("SpeakerInitialized.\n");
+}
 
 /**
  * Read DHT sensor
  * @return null
  */
 void readDHT() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered readDHT.");
+  #endif
+
   delay(DHTTIME);
   
   // Read data (~250ms)
@@ -107,45 +133,38 @@ void readDHT() {
     CF = " *C\t";
   }
 
-  char* output = "";
-  sprintf(
-    output,
-    "Temperature: %d %c Humidity: %d %%\t Heat Index: %d %c\n",
-    floatToIntHack(temp),
-    CF,
-    floatToIntHack(humidity),
-    floatToIntHack(hIndex),
-    CF
-  );
-  Serial.print(output);
-
-  // Serial.print("Temperature: ");
-  // Serial.print(temp);
-  // Serial.print(CF);
-  // Serial.print("Humidity: ");
-  // Serial.print(humidity);
-  // Serial.print("%\t");
-  // Serial.print("Heat Index: ");
-  // Serial.print(hIndex);
-  // Serial.print(CF);
-  // Serial.print("\n");
+  Serial.print("Temperature: ");
+  Serial.print(temp);
+  Serial.print(CF);
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.print("%\t");
+  Serial.print("Heat Index: ");
+  Serial.print(hIndex);
+  Serial.print(CF);
+  Serial.print("\n");
 }
 
-// Initialize PIR sensor
+/**
+ * Initialize PIR
+ */
 void initializePIR() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered initializePIR.");
+  #endif
+
   pinMode(PIRPIN, INPUT);
   pinMode(PIRLED, OUTPUT);
   
   // Set sensor off to start.
   digitalWrite(PIRPIN, LOW);
   
-  Serial.print("Initializing PIR sensor.\n");
+  Serial.print("Initializing PIR sensor.");
   for (int i; i < PIRINIT; i++) {
     Serial.print(".");
     delay(1000);
   }
-  initialized[0] = true;
-  Serial.print("PIR sensor initialized.\n");
+  Serial.print("\nPIR sensor initialized.\n");
   delay(50);
 }
 
@@ -153,6 +172,10 @@ void initializePIR() {
  * Read PIR sensor
  */
 void readPIR() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered readPIR.");
+  #endif
+
   int pir = digitalRead(PIRPIN);
   int state = LOW;
   
@@ -179,22 +202,26 @@ void readPIR() {
  * Read MQ2 sensor
  */
 void readMQ2() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered readMQ2.");
+  #endif
+
   int gasLvl = analogRead(MQ2PIN);
   int state = LOW;
 
   // if levels are too high...
-  if (gasLvl > 200 || state == HIGH) {
+  if (gasLvl > 500 || state == HIGH) {
     state = HIGH;
     Serial.print("Gas detected! [");
     Serial.print(gasLvl);
     Serial.print("]\n");
-//    toggleAlarm(GASALARM);
+    toggleAlarm(GASALARM);
   } else if (gasLvl <= 200 && state == HIGH) {
     state = LOW;
     Serial.print("Gas levels nominal. [");
     Serial.print(gasLvl);
     Serial.print("]\n");
-// toggleAlarm(false);
+    toggleAlarm(false);
   }
 }
 
@@ -202,6 +229,10 @@ void readMQ2() {
  * Read fire sensor
  */
 void readFire() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered readFire.");
+  #endif
+
   // Map sensor range
   int range = map(analogRead(FIREPIN), FIREMIN, FIREMAX, 0, 3);
 
@@ -227,6 +258,13 @@ void readFire() {
  * @param  int alarm
  */
 void toggleAlarm(int alarm) {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered toggleAlarm.");
+    Serial.print("[DEBUG] Passed param: alarm = ");
+    Serial.print(alarm);
+    Serial.print("\n");
+  #endif
+
   switch(alarm) {
     case FIREALARM:
       Serial.print("alarm activated. [fire]\n");
@@ -234,7 +272,7 @@ void toggleAlarm(int alarm) {
 //      digitalWrite(SPEAKERPIN, HIGH);
       playTone(500, 600);
       delay(100);
-      playTone(500, 800);
+      playTone(500, 600);
       delay(100);
     break;
     case GASALARM:
@@ -260,6 +298,15 @@ void toggleAlarm(int alarm) {
  * @param  int  freq
  */
 void playTone(long duration, int freq) {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered playTone.");
+    Serial.print("[DEBUG] Passed Param: duration = ");
+    Serial.print(duration);
+    Serial.print("\n[DEBUG] Passed Param: freq = ");
+    Serial.print(freq);
+    Serial.print("\n");
+  #endif
+
   duration *= 1000;
   int period = (1.0 / freq) * 1000000;
   long elapsed_time = 0;
@@ -277,6 +324,20 @@ void playTone(long duration, int freq) {
  */
 void loop() {
   t = rtc.getTime();
+  Serial.print("Today is ");
+  Serial.print(rtc.getMonthStr());
+  Serial.print(t.date, DEC);
+  Serial.print(", ");
+  Serial.print(t.year, DEC);
+  Serial.println(".");
+  Serial.print("It is currently ");
+  Serial.print(t.hour);
+  Serial.print(":");
+  Serial.print(t.min);
+  Serial.print(":");
+  Serial.print(t.sec);
+  Serial.print("\n");
+
   readDHT();
   readPIR();
   readMQ2();
@@ -288,6 +349,10 @@ void loop() {
  * @return char*
  */
 char* generateFileName() {
+  #ifdef DEBUG
+    Serial.println("[DEBUG] Entered generateFileName.");
+  #endif
+
   char* name;
   
   sprintf(
@@ -312,6 +377,8 @@ void setup() {
   
   SPI.begin();
   dht.begin();
+  rtc.begin();
   initializePIR();
-  initializeRTC();
+  initializeSpeaker();
+  //initializeRTC();
 }
