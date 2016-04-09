@@ -15,11 +15,11 @@
 // #include <Adafruit_VC0706.h> // camera
 
 /* Defines */
-// #define DEBUG 1             // uncomment for debug (verbose) mode
+#define DEBUG 1             // uncomment for debug (verbose) mode
 // DHT
 #define DHTPIN 4 // arduino digital pin
 #define DHTTYPE DHT11       // DHT11 or DHT22
-#define DHTTIME 2000        // (ms) wait 2 sec between measurements
+#define DHTTIME 1000        // (ms) wait atleast 2 sec between measurements
 #define DHTFAHRENHEIT true  // Fahrenheit (true) or Celsius (false)
 // PIR
 #define PIRLED 13           // LED output pin
@@ -41,6 +41,8 @@
 
 /* Variables */
 int ledState = LOW;         // LED state
+int pirState = LOW;         // PIR state
+int gasState = LOW;         // gas state
 File photo;                 // camera photo
 Time t;                     // time instance
   
@@ -106,8 +108,6 @@ void readDHT() {
   #ifdef DEBUG
     Serial.println("[DEBUG] Entered readDHT.");
   #endif
-
-  delay(DHTTIME);
   
   // Read data (~250ms)
   float humidity = dht.readHumidity();
@@ -143,6 +143,7 @@ void readDHT() {
   Serial.print(hIndex);
   Serial.print(CF);
   Serial.print("\n");
+  delay(DHTTIME);
 }
 
 /**
@@ -177,23 +178,19 @@ void readPIR() {
   #endif
 
   int pir = digitalRead(PIRPIN);
-  int state = LOW;
   
-  // If there's motion...
-  if (pir == HIGH) {
-    if (state == LOW) {
-      // Toggle PIR state
-      state = HIGH;
+  if (pir == HIGH) {        // If motion is detected
+    if (pirState == LOW) {  // If there was not previous motion
+      pirState = HIGH;      // toggle state
       Serial.print("Motion detected.\n");
-      pinMode(PIRLED, HIGH);
-      // capturePhoto();
+      digitalWrite(PIRLED, HIGH); // toggle led
+      // capturePhoto();       // capture still image from camera
     }
-  } else {
-    digitalWrite(PIRLED, LOW);
-    if (state == HIGH) {
-      state == LOW;
+  } else {                  // No motion detected
+    if (pirState == HIGH) { // if there was previous motion
+      pirState == LOW;      // toggle state
       Serial.print("Motion ended.\n");
-      pinMode(PIRLED, LOW);
+      digitalWrite(PIRLED, LOW);  // toggle led
     }
   }
 }
@@ -326,10 +323,11 @@ void loop() {
   t = rtc.getTime();
   Serial.print("Today is ");
   Serial.print(rtc.getMonthStr());
+  Serial.print(" ");
   Serial.print(t.date, DEC);
   Serial.print(", ");
   Serial.print(t.year, DEC);
-  Serial.println(".");
+  Serial.print(".\n");
   Serial.print("It is currently ");
   Serial.print(t.hour);
   Serial.print(":");
@@ -342,6 +340,7 @@ void loop() {
   readPIR();
   readMQ2();
 //  readFire();
+  delay(1000);              // wait 1 sec so as not to send massive amounts of data
 }
 
 /**
