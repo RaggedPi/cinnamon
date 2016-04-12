@@ -15,7 +15,7 @@
 // #include <Adafruit_VC0706.h> // camera
 
 /* Defines */
-#define DEBUG 1             // uncomment for debug (verbose) mode
+// #define DEBUG 1             // uncomment for debug (verbose) mode
 // DHT
 #define DHTPIN 4 // arduino digital pin
 #define DHTTYPE DHT11       // DHT11 or DHT22
@@ -23,7 +23,7 @@
 #define DHTFAHRENHEIT true  // Fahrenheit (true) or Celsius (false)
 // PIR
 #define PIRLED 13           // LED output pin
-#define PIRPIN 2            // arduino digital pin
+#define PIRPIN 6            // arduino digital pin
 #define PIRINIT 30          // sensor intialization delay time
 // MQ2
 #define MQ2PIN A0           // arduino analog pin
@@ -43,6 +43,7 @@
 int ledState = LOW;         // LED state
 int pirState = LOW;         // PIR state
 int gasState = LOW;         // gas state
+int fireState = 0;         // fire detected state
 File photo;                 // camera photo
 Time t;                     // time instance
   
@@ -204,17 +205,16 @@ void readMQ2() {
   #endif
 
   int gasLvl = analogRead(MQ2PIN);
-  int state = LOW;
 
   // if levels are too high...
-  if (gasLvl > 500 || state == HIGH) {
-    state = HIGH;
+  if (gasLvl > 500 || gasState == HIGH) {
+    gasState = HIGH;
     Serial.print("Gas detected! [");
     Serial.print(gasLvl);
     Serial.print("]\n");
     toggleAlarm(GASALARM);
-  } else if (gasLvl <= 200 && state == HIGH) {
-    state = LOW;
+  } else if (gasLvl <= 200 && gasState == HIGH) {
+    gasState = LOW;
     Serial.print("Gas levels nominal. [");
     Serial.print(gasLvl);
     Serial.print("]\n");
@@ -236,15 +236,24 @@ void readFire() {
   switch (range) {
     case 0: // A fire within 1.5 feet
       Serial.print("Close fire!\n");
-      toggleAlarm(FIREALARM);
+      if(!fireState) {
+        fireState = 1;
+        toggleAlarm(FIREALARM);
+      }
       break;
     case 1: // A fire between 1.5 and 3 feet
       Serial.print("Distant fire detected.\n");
-      toggleAlarm(FIREALARM);
+      if(!fireState) {
+        fireState = 1;
+        toggleAlarm(FIREALARM);
+      }
       break;
     case 2: // No fire
-      Serial.print("All clear.\n");
-      toggleAlarm(false);      
+      if(fireState) {
+        Serial.print("All clear.\n");
+        fireState = 0;
+        toggleAlarm(false);
+      }
       break;
   }
   delay(FIRETIME);
@@ -268,7 +277,7 @@ void toggleAlarm(int alarm) {
 /** @todo separate tones for close and distant */
 //      digitalWrite(SPEAKERPIN, HIGH);
       playTone(500, 600);
-      delay(100);
+      delay(50);
       playTone(500, 600);
       delay(100);
     break;
@@ -339,7 +348,7 @@ void loop() {
   readDHT();
   readPIR();
   readMQ2();
-//  readFire();
+  readFire();
   delay(1000);              // wait 1 sec so as not to send massive amounts of data
 }
 
