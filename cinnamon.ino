@@ -6,16 +6,20 @@
 
 /* Includes */
 #include <TimeLib.h>        // time
+#include <DS1307RTC.h>      // rtc
 #include <Wire.h>           // 1-wire
 #include <DS3231.h>         // rtc
 #include <DHT.h>            // temp sensor
 #include <SPI.h>            // spi
 #include <SD.h>             // sd card reader
-//  #include <SoftwareSerial.h>  // camera
-// #include <Adafruit_VC0706.h> // camera
+#include <SoftwareSerial.h> // camera
+#include <Adafruit_VC0706.h>// camera
+#include <PrintCascade.h>   // debugging
+#include <SerialDebug.h>    // debugging
 
 /* Defines */
-// #define DEBUG 1             // uncomment for debug (verbose) mode
+#define DEBUG true          // uncomment for debugger
+#define VERBOSE false
 // DHT
 #define DHTPIN 4 // arduino digital pin
 #define DHTTYPE DHT11       // DHT11 or DHT22
@@ -38,18 +42,228 @@
 #define FIREALARM 2         // alarm delimiter
 // #define FIRECLOSEALARM 2    // alarm delimiter
 // #define FIREDISTANTALARM 3  // alarm delimiter
+// Camera
+#define CHIPSELECTPIN 10    // arduino digital pin
+#define CAMERATXPIN 2       // arduino digital pin
+#define CAMERARXPIN 3       // arduino digital pin
+#define CAMERAIMGSIZE VC0706_320x240  // camera image size
+#define CAMERAMOTIONDETECT true // camera motion detection
+// Data Logger
+#define LOG_INTERVAL 10000  // (ms) time between log entries
+#define SYNC_INTERVAL 1000  // (ms) interval to write data
 
 /* Variables */
 int ledState = LOW;         // LED state
 int pirState = LOW;         // PIR state
 int gasState = LOW;         // gas state
-int fireState = 0;         // fire detected state
+int fireState = 0;          // fire detected state
 File photo;                 // camera photo
-Time t;                     // time instance
-  
+File logfile;               // log file
+time_t t;                     // time instance
+SoftwareSerial cameraconnection = SoftwareSerial(CAMERATXPIN, CAMERARXPIN); // camera connection
+int *digitalPins;
+int *analogPins;
+int *digitalStates;
+int *analogStates;
+int syncTime;
+
 /* Objects */
 DHT dht(DHTPIN, DHTTYPE);   // thermometer
-DS3231  rtc(SDA, SCL);      // real time clock
+DS1307RTC  rtc;             // real time clock
+Adafruit_VC0706 cam = Adafruit_VC0706(&cameraconnection); // Camera
+
+/**
+ * Error
+ * @param char str
+ */
+void error(char *str)
+{
+  Serial.print("[ERROR] ");
+  Serial.print(str);
+  Serial.print("\n");    
+  while(1);
+}
+
+/**
+ * Generate filename
+ * @return char*
+ */
+char* generateFileName(char* override = "") {
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered generateFileName.");
+  }
+
+  if (override != "") {
+    return override;
+  }
+
+  char* name;
+
+  sprintf(
+    name,
+    "%d_%d_%d_%d_%d_%d",
+    month(),
+    day(),
+    year(),
+    hour(),
+    minute(),
+    second());
+
+  return name;
+}
+
+/**
+ * Initialize SD card
+ * @return
+ */
+void initializeSD() {
+  if (VERBOSE) {
+    Serial.print("[VERBOSE] Entered initializeSD.\n");
+  }
+
+  Serial.print("Initializing SD card...");
+  pinMode(CHIPSELECTPIN, OUTPUT);
+  
+  // Check if card exists
+  if (!SD.begin(CHIPSELECTPIN)) {
+    error("Card failed, or not present.");
+    return;
+  }
+
+  Serial.println("card initialized.");
+  
+  // create a new file
+  char filename[] = "LOGGER00.CSV";
+  for (uint8_t i = 0; i < 100; i++) {
+    filename[6] = i/10 + '0';
+    filename[7] = i%10 + '0';
+    if (!SD.exists(filename)) {
+      // only open a new file if it doesn't exist
+      logfile = SD.open(filename, FILE_WRITE); 
+      break;
+    }
+  }
+  
+  if (!logfile) {
+    error("could not create SD file.");
+  }
+  
+  Serial.print("Logging to: ");
+  Serial.print(filename);
+  Serial.print("\n");
+}
+
+/**
+ * Initialize camera
+ * @return null
+ */
+void initializeCamera() {
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered initializeCamera.");
+  }
+  
+  #if !defined(SOFTWARE_SPI)
+    if(CHIPSELECTPIN != 10) pinMode(CHIPSELECTPIN, OUTPUT); // SS
+  #endif
+
+  // Location camera
+  if (cam.begin()) {
+    Serial.print("Camera Found:\n");
+  } else {
+    Serial.print("No camera found!");
+    return;
+  }
+
+  // Camera information
+  char* reply = cam.getVersion();
+  if (reply != 0) { // Output info if present
+    Serial.print("---------------\n");
+    Serial.print(reply);
+    Serial.print("---------------\n");
+  }
+
+  // Image size
+  cam.setImageSize(CAMERAIMGSIZE);
+  uint8_t imgSize = cam.getImageSize();
+  char* dimensions;
+  Serial.print("Camera image size: ");
+  if (imgSize == VC0706_640x480) {
+      dimensions = "640x480";
+  } else if (imgSize == VC0706_320x240) {
+    dimensions = "320x240";
+  } else if (imgSize == VC0706_160x120) {
+    dimensions = "160x120";
+  } else {
+    dimensions = "unknown";
+  }
+  sprintf(dimensions, "Camera image size: %s", dimensions);
+  Serial.print(dimensions);  
+
+  // Motion detection
+  cam.setMotionDetect(CAMERAMOTIONDETECT);
+  Serial.print("Camera motion detection: ");
+  if (cam.getMotionDetect()) {
+    Serial.print("ON\n");
+  }
+  else {
+    Serial.print("OFF\n");
+  }
+
+  Serial.print("Camera initialized.\n");
+}
+
+/**
+ * Run camera
+ * @return null
+ */
+void runCamera() {
+  // Check for motion - if disabled, will return false
+  if (cam.motionDetected()) {
+   Serial.println("Motion!");   
+   cam.setMotionDetect(false);
+  
+  // Capture photo 
+  if (!cam.takePicture()) 
+    Serial.print("Failed to snap photo!\n");
+  else 
+    Serial.print("Picture taken.\n");
+  
+  char* filename = generateFileName("");
+  // create if does not exist, do not open existing, write, sync after write
+  if (! SD.exists(filename)) {
+    Serial.print("ERROR: filename already exists!\n");
+    return;
+  }
+  
+  File imgFile = SD.open(filename, FILE_WRITE);
+  
+  uint16_t jpglen = cam.frameLength();
+  Serial.print(jpglen, DEC);
+  Serial.print(" byte image\n");
+  Serial.print("Writing image to ");
+  Serial.print(filename);
+  
+  while (jpglen > 0) {
+    // read 32 bytes at a time;
+    uint8_t *buffer;
+    uint8_t bytesToRead = min(32, jpglen); // change 32 to 64 for a speedup but may not work with all setups!
+    buffer = cam.readPicture(bytesToRead);
+    imgFile.write(buffer, bytesToRead);
+
+    /*
+    Serial.print("Read ");
+    Serial.print(bytesToRead, DEC);
+    Serial.println(" bytes");
+    */
+
+    jpglen -= bytesToRead;
+  }
+  imgFile.close();
+  Serial.print("Image saved.\n");
+  cam.resumeVideo();
+  cam.setMotionDetect(true);
+ }
+}
 
 /**
  * Float to int hack
@@ -59,9 +273,9 @@ DS3231  rtc(SDA, SCL);      // real time clock
  * @return int
  */
 int floatToIntHack(float f) {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered floatToIntHack.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered floatToIntHack.");
+  }
 
   int i = f * 100;
   return i;
@@ -71,18 +285,17 @@ int floatToIntHack(float f) {
  * Initialize RTC
  */
 void initializeRTC() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered initializeRTC.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered initializeRTC.");
+  }
 
   Serial.print("Initializing Real Time Clock...\n");
   // Init RTC in 24 hour mode
-  rtc.begin(); 
+  // if(!rtc.begin(CHIPSELECTPIN)) {
+  //   logFile.println("RTC failed.");
+  // } 
+  setSyncProvider(RTC.get);
 
-  // Set inital date/time
-  rtc.setTime(13,0,0);
-  rtc.setDate(2,4,2016);
-  
   Serial.print("RTC Initialized.\n");
 }
 
@@ -90,15 +303,15 @@ void initializeRTC() {
  * Initialize speaker
  */
 void initializeSpeaker() {
-  #ifdef DEBUG
-    Serial.print("[DEBUG] Entered initializeSpeaker.");
-  #endif
+  if (VERBOSE) {
+    Serial.print("[VERBOSE] Entered initializeSpeaker.");
+  }
 
   Serial.print("Initializing speaker...\n");
 
   pinMode(SPEAKERPIN, OUTPUT);
   delay(1000);
-  Serial.print("SpeakerInitialized.\n");
+  Serial.print("Speaker Initialized.\n");
 }
 
 /**
@@ -106,9 +319,9 @@ void initializeSpeaker() {
  * @return null
  */
 void readDHT() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered readDHT.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered readDHT.");
+  }
   
   // Read data (~250ms)
   float humidity = dht.readHumidity();
@@ -151,9 +364,9 @@ void readDHT() {
  * Initialize PIR
  */
 void initializePIR() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered initializePIR.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered initializePIR.");
+  }
 
   pinMode(PIRPIN, INPUT);
   pinMode(PIRLED, OUTPUT);
@@ -174,9 +387,9 @@ void initializePIR() {
  * Read PIR sensor
  */
 void readPIR() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered readPIR.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered readPIR.");
+  }
 
   int pir = digitalRead(PIRPIN);
   
@@ -184,6 +397,7 @@ void readPIR() {
     if (pirState == LOW) {  // If there was not previous motion
       pirState = HIGH;      // toggle state
       Serial.print("Motion detected.\n");
+      logfile.println("Motion detected.");
       digitalWrite(PIRLED, HIGH); // toggle led
       // capturePhoto();       // capture still image from camera
     }
@@ -200,18 +414,19 @@ void readPIR() {
  * Read MQ2 sensor
  */
 void readMQ2() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered readMQ2.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered readMQ2.");
+  }
 
   int gasLvl = analogRead(MQ2PIN);
 
   // if levels are too high...
   if (gasLvl > 500 || gasState == HIGH) {
     gasState = HIGH;
-    Serial.print("Gas detected! [");
-    Serial.print(gasLvl);
-    Serial.print("]\n");
+    char *msg;
+    sprintf(msg, "Gas detected! [%d]\n", gasLvl);
+    Serial.print(msg);
+    logfile.print(msg);
     toggleAlarm(GASALARM);
   } else if (gasLvl <= 200 && gasState == HIGH) {
     gasState = LOW;
@@ -226,23 +441,28 @@ void readMQ2() {
  * Read fire sensor
  */
 void readFire() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered readFire.");
-  #endif
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered readFire.");
+  }
 
   // Map sensor range
   int range = map(analogRead(FIREPIN), FIREMIN, FIREMAX, 0, 3);
+  char *msg;
 
   switch (range) {
     case 0: // A fire within 1.5 feet
-      Serial.print("Close fire!\n");
+      msg = "Close fire!\n";
+      Serial.print(msg);
+      logfile.print(msg);
       if(!fireState) {
         fireState = 1;
         toggleAlarm(FIREALARM);
       }
       break;
     case 1: // A fire between 1.5 and 3 feet
-      Serial.print("Distant fire detected.\n");
+      msg = "Distant fire detected.\n";
+      Serial.print(msg);
+      logfile.print(msg);
       if(!fireState) {
         fireState = 1;
         toggleAlarm(FIREALARM);
@@ -250,7 +470,9 @@ void readFire() {
       break;
     case 2: // No fire
       if(fireState) {
-        Serial.print("All clear.\n");
+        msg = "All clear.\n";
+        Serial.print(msg);
+        logfile.print(msg);
         fireState = 0;
         toggleAlarm(false);
       }
@@ -264,16 +486,20 @@ void readFire() {
  * @param  int alarm
  */
 void toggleAlarm(int alarm) {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered toggleAlarm.");
-    Serial.print("[DEBUG] Passed param: alarm = ");
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered toggleAlarm.");
+    Serial.print("[VERBOSE] Passed param: alarm = ");
     Serial.print(alarm);
     Serial.print("\n");
-  #endif
+  }
+
+  char* msg;
 
   switch(alarm) {
     case FIREALARM:
-      Serial.print("alarm activated. [fire]\n");
+      msg = "alarm activated. [fire]\n";
+      Serial.print(msg);
+      logfile.print(msg);
 /** @todo separate tones for close and distant */
 //      digitalWrite(SPEAKERPIN, HIGH);
       playTone(500, 600);
@@ -282,7 +508,9 @@ void toggleAlarm(int alarm) {
       delay(100);
     break;
     case GASALARM:
-      Serial.print("alarm activated. [gas]\n");
+      msg = "alarm activated. [gas]\n";
+      Serial.print(msg);
+      logfile.print(msg);
 //      digitalWrite(SPEAKERPIN, HIGH);
       playTone(500, 400);
       delay(100);
@@ -290,7 +518,9 @@ void toggleAlarm(int alarm) {
       delay(100);
     break;
     case false:
-      Serial.print("alarm deactivated.");
+      msg = "alarm deactivated.";
+      Serial.print(msg);
+      logfile.print(msg);
 //      digitalWrite(SPEAKERPIN, LOW);
       playTone(0, 0);
       delay(300);      
@@ -304,14 +534,14 @@ void toggleAlarm(int alarm) {
  * @param  int  freq
  */
 void playTone(long duration, int freq) {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered playTone.");
-    Serial.print("[DEBUG] Passed Param: duration = ");
+  if (VERBOSE) {
+    Serial.println("[VERBOSE] Entered playTone.");
+    Serial.print("[VERBOSE] Passed Param: duration = ");
     Serial.print(duration);
-    Serial.print("\n[DEBUG] Passed Param: freq = ");
+    Serial.print("\n[VERBOSE] Passed Param: freq = ");
     Serial.print(freq);
     Serial.print("\n");
-  #endif
+  }
 
   duration *= 1000;
   int period = (1.0 / freq) * 1000000;
@@ -329,64 +559,68 @@ void playTone(long duration, int freq) {
  * Loop
  */
 void loop() {
-  t = rtc.getTime();
-  Serial.print("Today is ");
-  Serial.print(rtc.getMonthStr());
-  Serial.print(" ");
-  Serial.print(t.date, DEC);
-  Serial.print(", ");
-  Serial.print(t.year, DEC);
-  Serial.print(".\n");
-  Serial.print("It is currently ");
-  Serial.print(t.hour);
-  Serial.print(":");
-  Serial.print(t.min);
-  Serial.print(":");
-  Serial.print(t.sec);
-  Serial.print("\n");
+  // Debugging
+  if (DEBUG) {
+    SerialDebugger.debug(NOTIFICATION,"loop","notifications are enabled");
+    if (SerialDebugger.debug(ERROR,"loop","errors are disabled")) {
+      /** @TODO reset vars, etc */
+    }
+  }
+
+  // Wait
+  delay((LOG_INTERVAL -1) - (millis() % LOG_INTERVAL));
+
+  t = now();
+  // Log time
+  // logfile.print(now.unixtime()); // seconds since 1/1/1970
+  // logfile.print(", ");
+  logfile.print('"');
+  logfile.print(year(), DEC);
+  logfile.print("/");
+  logfile.print(month(), DEC);
+  logfile.print("/");
+  logfile.print(day(), DEC);
+  logfile.print(" ");
+  logfile.print(hour(), DEC);
+  logfile.print(":");
+  logfile.print(minute(), DEC);
+  logfile.print(":");
+  logfile.print(second(), DEC);
+  logfile.print('"');
 
   readDHT();
   readPIR();
   readMQ2();
   readFire();
-  delay(1000);              // wait 1 sec so as not to send massive amounts of data
-}
+  runCamera();
 
-/**
- * Generate filename
- * @return char*
- */
-char* generateFileName() {
-  #ifdef DEBUG
-    Serial.println("[DEBUG] Entered generateFileName.");
-  #endif
-
-  char* name;
+  if ((millis() - syncTime) < SYNC_INTERVAL) return;
+  syncTime = millis();
   
-  sprintf(
-    name,
-    "%d_%d_%d_%d_%d_%d",
-    rtc.getMonthStr(),
-    t.date,
-    t.year,
-    t.hour,
-    t.min,
-    t.sec);
-
-  return name;
+  logfile.flush();
 }
 
 /**
  * Setup
  */
 void setup() {
+  if (DEBUG) {
+    SerialDebugger.begin(9600);
+    SerialDebugger.enable(NOTIFICATION);
+    SerialDebugger.enable(ERROR);
+  }
   Serial.begin(9600);
   Serial.println("RaggedPi Project Codename Cinnamon Initialized.");
   
   SPI.begin();
   dht.begin();
-  rtc.begin();
+  Wire.begin();
+  initializeRTC();
   initializePIR();
   initializeSpeaker();
-  //initializeRTC();
+  initializeSD();
+  initializeCamera();
+
+  logfile.println("millis,stamp,datetime,light,temp,vcc");    
+
 }
